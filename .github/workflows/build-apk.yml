@@ -14,21 +14,41 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
+      - name: Detect package path and verify native template
+        run: |
+          set -e
+          PACKAGE_NAME=$(grep -m1 -oE 'namespace[[:space:]]*=?[[:space:]]*"[^"]+"' android/app/build.gradle | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$PACKAGE_NAME" ]; then
+            PACKAGE_NAME=$(grep -m1 -oE 'applicationId[[:space:]]*=?[[:space:]]*"[^"]+"' android/app/build.gradle | sed -E 's/.*"([^"]+)".*/\1/')
+          fi
+          APP_PATH="${PACKAGE_NAME//./\/}"
+          echo "PACKAGE_NAME=$PACKAGE_NAME"
+          echo "APP_PATH=$APP_PATH"
+          DIR="android/app/src/main/java/$APP_PATH"
+          ls -la "$DIR"
+          for f in CrashLogger.java AppLoggerPackage.java; do
+            test -f "$DIR/$f" || { echo "MISSING: $DIR/$f"; exit 1; }
+          done
+          test -f "$DIR/MainActivity.kt" || test -f "$DIR/MainActivity.java" || { echo "MISSING MainActivity"; exit 1; }
+          test -f "$DIR/MainApplication.kt" || test -f "$DIR/MainApplication.java" || { echo "MISSING MainApplication"; exit 1; }
+          grep -R "CrashLogger.install" "$DIR" || { echo "MISSING CrashLogger.install"; exit 1; }
+          grep -RF "add(AppLoggerPackage())" "$DIR" || { echo "MISSING add(AppLoggerPackage())"; exit 1; }
+          echo "Native Android template verified."
+
       - name: Install dependencies
-        run: npm ci
+        run: npm ci || npm install --legacy-peer-deps
 
       - name: Build release APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:
